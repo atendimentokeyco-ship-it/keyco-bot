@@ -404,6 +404,12 @@ def handle_message(chat_id, text=None, photo=None, document=None):
         return
     tl = text.lower().strip()
 
+    # ESCAPE DE QUALQUER ESTADO
+    if tl in ["menu", "/menu", "/start", "oi", "olá", "ola", "cancelar", "cancel", "sair", "voltar", "escape", "inicio", "início"]:
+        user_states[chat_id] = {}
+        send_message(chat_id, "🏢 *Keycomerce — Financeiro*\n\nEscolha uma opção:", kb_menu_principal())
+        return
+
     # ESTADOS DE CONVERSA
     if state.get("step") == "nova_pagar_manual":
         parts = [p.strip() for p in text.split(",")]
