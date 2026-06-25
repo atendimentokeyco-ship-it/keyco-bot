@@ -600,27 +600,40 @@ Ex: "paguei Udinese" → {"intencao":"marcar_pago","dados":{"nome":"Udinese"}}""
     send_message(chat_id, "🤔 Não entendi. Use o menu:", kb_menu_principal())
 
 def read_boleto_image(file_id):
+    print(f"[BOLETO] Iniciando leitura file_id={file_id}")
     if not ANTHROPIC_KEY:
+        print("[BOLETO] Sem ANTHROPIC_KEY")
         return None
     try:
+        print("[BOLETO] Buscando file_path no Telegram...")
         file_info = http_get(f"{TELEGRAM_API}/getFile?file_id={file_id}")
         file_data = json.loads(file_info)
         file_path = file_data.get("result", {}).get("file_path", "")
+        print(f"[BOLETO] file_path={file_path}")
         if not file_path:
+            print("[BOLETO] file_path vazio")
             return None
+        print("[BOLETO] Baixando arquivo...")
         file_bytes = http_get(f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}")
+        print(f"[BOLETO] Arquivo: {len(file_bytes)} bytes")
         b64 = base64.b64encode(file_bytes).decode()
         media_type = "image/jpeg"
         if file_path.endswith(".png"): media_type = "image/png"
         elif file_path.endswith(".pdf"): media_type = "application/pdf"
+        print(f"[BOLETO] media_type={media_type}, enviando para Claude...")
+        prompt = "Este e um boleto bancario brasileiro. Extraia: 1) Nome do beneficiario/fornecedor, 2) Valor total, 3) Data de vencimento. Responda SOMENTE em JSON sem markdown: {"fornecedor":"nome aqui","valor":0.00,"vencimento":"dd/mm/aaaa"}"
         if media_type == "application/pdf":
-            content = [{"type": "document", "source": {"type": "base64", "media_type": media_type, "data": b64}}, {"type": "text", "text": "Boleto. Extraia fornecedor, valor, vencimento. SOMENTE JSON: {\"fornecedor\":\"...\",\"valor\":0.00,\"vencimento\":\"dd/mm/aaaa\"}"}]
+            content = [{"type": "document", "source": {"type": "base64", "media_type": media_type, "data": b64}}, {"type": "text", "text": prompt}]
         else:
-            content = [{"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}}, {"type": "text", "text": "Boleto. Extraia fornecedor, valor, vencimento. SOMENTE JSON: {\"fornecedor\":\"...\",\"valor\":0.00,\"vencimento\":\"dd/mm/aaaa\"}"}]
-        result = call_anthropic({"model": "claude-sonnet-4-20250514", "max_tokens": 200, "messages": [{"role": "user", "content": content}]})
-        return json.loads(result.replace("```json","").replace("```","").strip())
+            content = [{"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}}, {"type": "text", "text": prompt}]
+        result = call_anthropic({"model": "claude-sonnet-4-20250514", "max_tokens": 300, "messages": [{"role": "user", "content": content}]})
+        print(f"[BOLETO] Claude respondeu: {result}")
+        cleaned = result.replace("```json","").replace("```","").strip()
+        parsed = json.loads(cleaned)
+        print(f"[BOLETO] Parsed OK: {parsed}")
+        return parsed
     except Exception as e:
-        print(f"Erro boleto: {e}")
+        print(f"[BOLETO] ERRO: {type(e).__name__}: {e}")
         return None
 
 # ── WEBHOOK ──
