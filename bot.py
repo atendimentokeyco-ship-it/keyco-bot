@@ -5,11 +5,22 @@ import base64
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
+import time
+import io
+try:
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    EXCEL_OK = True
+except ImportError:
+    EXCEL_OK = False
+    print("[EXCEL] openpyxl nao disponivel")
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY", "")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 DATA_FILE = "keyco_data.json"
+ADMIN_CHAT_ID = 8601577256  # Chat ID do Filipi
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -480,6 +491,12 @@ def handle_message(chat_id, text=None, photo=None, document=None):
             send_message(chat_id, "❌ Cancelado.", [[{"text": "🏠 Menu", "callback_data": "menu_principal"}]])
         return
 
+    # PLANILHA
+    if tl in ["planilha", "gerar planilha", "exportar", "excel", "relatorio", "relatório"]:
+        send_message(chat_id, "⏳ Gerando planilha...")
+        threading.Thread(target=enviar_planilha, args=(chat_id, "📊 Planilha gerada agora")).start()
+        return
+
     # MARCAR PAGO POR TEXTO
     if tl.startswith("paguei") or tl.startswith("pago "):
         nome = tl.replace("paguei","").replace("pago","").strip()
@@ -636,6 +653,225 @@ def read_boleto_image(file_id):
         print(f"[BOLETO] ERRO: {type(e).__name__}: {e}")
         return None
 
+# ── EXCEL ──
+def gerar_excel():
+    if not EXCEL_OK:
+        return None
+    try:
+        db = load_data()
+        wb = openpyxl.Workbook()
+
+        # Estilos
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        header_fill_red = PatternFill("solid", fgColor="C0392B")
+        header_fill_green = PatternFill("solid", fgColor="27AE60")
+        header_fill_blue = PatternFill("solid", fgColor="2980B9")
+        header_fill_gray = PatternFill("solid", fgColor="7F8C8D")
+        center = Alignment(horizontal="center", vertical="center")
+        left = Alignment(horizontal="left", vertical="center")
+        thin = Border(
+            left=Side(style="thin"), right=Side(style="thin"),
+            top=Side(style="thin"), bottom=Side(style="thin")
+        )
+        vencido_fill = PatternFill("solid", fgColor="FADBD8")
+        hoje_fill = PatternFill("solid", fgColor="FDEBD0")
+        pago_fill = PatternFill("solid", fgColor="D5F5E3")
+        aberto_fill = PatternFill("solid", fgColor="EBF5FB")
+
+        def set_header(ws, headers, fill):
+            ws.append(headers)
+            for cell in ws[1]:
+                cell.font = header_font
+                cell.fill = fill
+                cell.alignment = center
+                cell.border = thin
+
+        def auto_width(ws):
+            for col in ws.columns:
+                max_len = 0
+                col_letter = get_column_letter(col[0].column)
+                for cell in col:
+                    try:
+                        if cell.value:
+                            max_len = max(max_len, len(str(cell.value)))
+                    except:
+                        pass
+                ws.column_dimensions[col_letter].width = min(max_len + 4, 40)
+
+        hoje = datetime.now()
+
+        # ── ABA RESUMO ──
+        ws_res = wb.active
+        ws_res.title = "Resumo"
+        ws_res.append(["KEYCOMERCE — RESUMO FINANCEIRO"])
+        ws_res.append([f"Gerado em: {hoje.strftime('%d/%m/%Y às %H:%M')}"])
+        ws_res.append([])
+        ws_res["A1"].font = Font(bold=True, size=14, color="1A4F8A")
+        ws_res["A2"].font = Font(italic=True, size=10, color="7F8C8D")
+
+        pag_ab = [p for p in db["pagar"] if p["status"]=="aberto"]
+        pag_pg = [p for p in db["pagar"] if p["status"]=="pago"]
+        pag_venc = [p for p in pag_ab if days_until(p["vencimento"])<0]
+        pag_hoje = [p for p in pag_ab if days_until(p["vencimento"])==0]
+        pag_sem = [p for p in pag_ab if 1<=days_until(p["vencimento"])<=7]
+        rec_ab = [r for r in db["receber"] if r["status"]=="aberto"]
+        rec_pg = [r for r in db["receber"] if r["status"]=="pago"]
+        rec_venc = [r for r in rec_ab if days_until(r["vencimento"])<0]
+        orc_pend = [o for o in db["orcamentos"] if o["status"]=="pendente"]
+        orc_aprov = [o for o in db["orcamentos"] if o["status"]=="aprovado"]
+
+        resumo_data = [
+            ["CATEGORIA", "QUANTIDADE", "VALOR TOTAL"],
+            ["A PAGAR — Em aberto", len(pag_ab), sum(float(p["valor"]) for p in pag_ab)],
+            ["A PAGAR — Vencidas", len(pag_venc), sum(float(p["valor"]) for p in pag_venc)],
+            ["A PAGAR — Vence hoje", len(pag_hoje), sum(float(p["valor"]) for p in pag_hoje)],
+            ["A PAGAR — Esta semana", len(pag_sem), sum(float(p["valor"]) for p in pag_sem)],
+            ["A PAGAR — Pagas", len(pag_pg), sum(float(p["valor"]) for p in pag_pg)],
+            [],
+            ["A RECEBER — Em aberto", len(rec_ab), sum(float(r["valor"]) for r in rec_ab)],
+            ["A RECEBER — Vencidas", len(rec_venc), sum(float(r["valor"]) for r in rec_venc)],
+            ["A RECEBER — Recebidas", len(rec_pg), sum(float(r["valor"]) for r in rec_pg)],
+            [],
+            ["ORÇAMENTOS — Pendentes", len(orc_pend), sum(float(o["valor"]) for o in orc_pend)],
+            ["ORÇAMENTOS — Aprovados", len(orc_aprov), sum(float(o["valor"]) for o in orc_aprov)],
+        ]
+        for row in resumo_data:
+            ws_res.append(row)
+        ws_res.column_dimensions["A"].width = 35
+        ws_res.column_dimensions["B"].width = 15
+        ws_res.column_dimensions["C"].width = 20
+
+        # ── ABA A PAGAR ──
+        ws_pag = wb.create_sheet("A Pagar")
+        set_header(ws_pag, ["ID", "Fornecedor", "Valor (R$)", "Vencimento", "Status", "Dias", "Data Pagamento"], header_fill_red)
+        for p in sorted(db["pagar"], key=lambda x: days_until(x["vencimento"]) if x["status"]!="pago" else 9999):
+            d = days_until(p["vencimento"]) if p["status"]!="pago" else None
+            if p["status"] == "pago":
+                status_txt = "Pago"
+                dias_txt = "—"
+            elif d < 0:
+                status_txt = "Vencida"
+                dias_txt = f"{abs(d)}d atrás"
+            elif d == 0:
+                status_txt = "Vence hoje"
+                dias_txt = "Hoje"
+            else:
+                status_txt = "Em aberto"
+                dias_txt = f"Em {d}d"
+            row = [p["id"], p["fornecedor"], float(p["valor"]), p["vencimento"], status_txt, dias_txt, p.get("data_pagamento","")]
+            ws_pag.append(row)
+            r = ws_pag.max_row
+            fill = pago_fill if p["status"]=="pago" else (vencido_fill if d is not None and d<=0 else (hoje_fill if d is not None and d<=3 else aberto_fill))
+            for cell in ws_pag[r]:
+                cell.fill = fill
+                cell.border = thin
+                cell.alignment = left
+            ws_pag[f"C{r}"].number_format = 'R$ #,##0.00'
+        auto_width(ws_pag)
+
+        # ── ABA A RECEBER ──
+        ws_rec = wb.create_sheet("A Receber")
+        set_header(ws_rec, ["ID", "Cliente", "Valor (R$)", "Vencimento", "Status", "Dias", "Data Recebimento", "NF"], header_fill_green)
+        for r in sorted(db["receber"], key=lambda x: days_until(x["vencimento"]) if x["status"]!="pago" else 9999):
+            d = days_until(r["vencimento"]) if r["status"]!="pago" else None
+            if r["status"] == "pago":
+                status_txt = "Recebido"
+                dias_txt = "—"
+            elif d < 0:
+                status_txt = "Vencida"
+                dias_txt = f"{abs(d)}d atrás"
+            elif d == 0:
+                status_txt = "Vence hoje"
+                dias_txt = "Hoje"
+            else:
+                status_txt = "Em aberto"
+                dias_txt = f"Em {d}d"
+            row_data = [r["id"], r["cliente"], float(r["valor"]), r["vencimento"], status_txt, dias_txt, r.get("data_pagamento",""), r.get("nf","")]
+            ws_rec.append(row_data)
+            rn = ws_rec.max_row
+            fill = pago_fill if r["status"]=="pago" else (vencido_fill if d is not None and d<=0 else (hoje_fill if d is not None and d<=3 else aberto_fill))
+            for cell in ws_rec[rn]:
+                cell.fill = fill
+                cell.border = thin
+                cell.alignment = left
+            ws_rec[f"C{rn}"].number_format = 'R$ #,##0.00'
+        auto_width(ws_rec)
+
+        # ── ABA ORÇAMENTOS ──
+        ws_orc = wb.create_sheet("Orçamentos")
+        set_header(ws_orc, ["ID", "Cliente", "Descrição", "Valor (R$)", "Status", "Data"], header_fill_blue)
+        status_colors = {"pendente": hoje_fill, "aprovado": pago_fill, "recusado": vencido_fill, "enviado": aberto_fill}
+        for o in db["orcamentos"]:
+            ws_orc.append([o["id"], o["cliente"], o["descricao"], float(o["valor"]), o["status"].capitalize(), o["data"]])
+            rn = ws_orc.max_row
+            fill = status_colors.get(o["status"], aberto_fill)
+            for cell in ws_orc[rn]:
+                cell.fill = fill
+                cell.border = thin
+                cell.alignment = left
+            ws_orc[f"D{rn}"].number_format = 'R$ #,##0.00'
+        auto_width(ws_orc)
+
+        # Salvar em buffer
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf.getvalue()
+    except Exception as e:
+        print(f"[EXCEL] Erro: {e}")
+        return None
+
+def enviar_planilha(chat_id, motivo="📊 Planilha diária"):
+    if not EXCEL_OK:
+        send_message(chat_id, "❌ openpyxl não instalado.")
+        return
+    excel_bytes = gerar_excel()
+    if not excel_bytes:
+        send_message(chat_id, "❌ Erro ao gerar planilha.")
+        return
+    try:
+        nome = f"Keycomerce_{datetime.now().strftime('%d%m%Y')}.xlsx"
+        boundary = "----KeycoBoundary"
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{chat_id}\r\n'
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="caption"\r\n\r\n{motivo} — {datetime.now().strftime("%d/%m/%Y")}\r\n'
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="document"; filename="{nome}"\r\n'
+            f"Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n"
+        ).encode() + excel_bytes + f"\r\n--{boundary}--\r\n".encode()
+
+        req = urllib.request.Request(
+            f"{TELEGRAM_API}/sendDocument",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+            if result.get("ok"):
+                print(f"[EXCEL] Planilha enviada para {chat_id}")
+            else:
+                print(f"[EXCEL] Erro Telegram: {result}")
+    except Exception as e:
+        print(f"[EXCEL] Erro envio: {e}")
+        send_message(chat_id, f"❌ Erro ao enviar planilha: {e}")
+
+def scheduler():
+    print("[SCHEDULER] Iniciando agendador...")
+    while True:
+        try:
+            now = datetime.now()
+            if now.hour == 8 and now.minute == 0:
+                print(f"[SCHEDULER] Enviando planilha diária {now.strftime('%d/%m/%Y')}")
+                enviar_planilha(ADMIN_CHAT_ID, "☀️ Bom dia! Planilha financeira do dia")
+                time.sleep(61)
+            else:
+                time.sleep(30)
+        except Exception as e:
+            print(f"[SCHEDULER] Erro: {e}")
+            time.sleep(60)
+
 # ── WEBHOOK ──
 class WebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -724,6 +960,10 @@ def setup_webhook():
             print(f"Erro webhook: {e}")
 
 if __name__ == "__main__":
+    if EXCEL_OK:
+        scheduler_thread = threading.Thread(target=scheduler, daemon=True)
+        scheduler_thread.start()
+        print("[SCHEDULER] Thread iniciada")
     port = int(os.environ.get("PORT", 8080))
     setup_webhook()
     print(f"Keycomerce Bot rodando na porta {port}")
