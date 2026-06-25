@@ -621,7 +621,7 @@ def read_boleto_image(file_id):
         if file_path.endswith(".png"): media_type = "image/png"
         elif file_path.endswith(".pdf"): media_type = "application/pdf"
         print(f"[BOLETO] media_type={media_type}, enviando para Claude...")
-        prompt = "Este e um boleto bancario brasileiro. Extraia: 1) Nome do beneficiario/fornecedor, 2) Valor total, 3) Data de vencimento. Responda SOMENTE em JSON sem markdown: {"fornecedor":"nome aqui","valor":0.00,"vencimento":"dd/mm/aaaa"}"
+        prompt = 'Este e um boleto bancario brasileiro. Extraia: fornecedor/beneficiario, valor total, data de vencimento. Responda SOMENTE JSON: {"fornecedor":"...","valor":0.00,"vencimento":"dd/mm/aaaa"}'
         if media_type == "application/pdf":
             content = [{"type": "document", "source": {"type": "base64", "media_type": media_type, "data": b64}}, {"type": "text", "text": prompt}]
         else:
