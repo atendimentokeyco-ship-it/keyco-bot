@@ -256,9 +256,13 @@ def handle_message(chat_id, text=None, photo=None, document=None):
         send_message(chat_id, """🏢 *Keycomerce — Financeiro*
 
 💸 *A pagar*
-• `pagar` — ver todas
+• `pagar` — em aberto
 • `hoje` — vence hoje
 • `semana` — próximos 7 dias
+• `mes` — este mês
+• `vencido` — em atraso
+• `pago` — já pagos
+• `tudo` — todas as contas
 • `paguei [nome]` — marcar pago
 
 📥 *A receber*
@@ -354,6 +358,64 @@ def handle_message(chat_id, text=None, photo=None, document=None):
         linhas = ["📋 *Orçamentos*\n"]
         for o in items:
             linhas.append(f"{emoji.get(o['status'],'⚪')} *{o['id']}* — {o['cliente']}\n📋 {o['descricao']} · {fmt_brl(o['valor'])}\n")
+        send_message(chat_id, "\n".join(linhas))
+        return
+
+    if tl in ["mes", "mês", "esse mes", "esse mês", "pagamentos do mes", "pagamentos do mês", "contas do mes", "contas do mês"]:
+        hoje = datetime.now()
+        items = [p for p in data["pagar"] if p["status"]=="aberto"]
+        try:
+            items_mes = [p for p in items if p["vencimento"].split("/")[1] == str(hoje.month).zfill(2) and p["vencimento"].split("/")[2] == str(hoje.year)]
+        except:
+            items_mes = items
+        if not items_mes:
+            send_message(chat_id, f"✅ Nenhuma conta a pagar em {hoje.strftime('%m/%Y')}.")
+            return
+        linhas = [f"📅 *Contas a pagar — {hoje.strftime('%m/%Y')}*\n"]
+        for p in sorted(items_mes, key=lambda x: days_until(x["vencimento"])):
+            d = days_until(p["vencimento"])
+            linhas.append(f"{status_venc(d)} *{p['id']}*\n🏢 {p['fornecedor']}\n💰 {fmt_brl(p['valor'])} · {p['vencimento']}\n")
+        linhas.append(f"*Total: {fmt_brl(sum(p['valor'] for p in items_mes))}*")
+        send_message(chat_id, "\n".join(linhas))
+        return
+
+    if tl in ["vencido", "vencidos", "atrasado", "atrasados", "em atraso"]:
+        items = [p for p in data["pagar"] if p["status"]=="aberto" and days_until(p["vencimento"])<0]
+        if not items:
+            send_message(chat_id, "✅ Nenhuma conta vencida.")
+            return
+        linhas = ["🔴 *Contas vencidas*\n"]
+        for p in items:
+            d = days_until(p["vencimento"])
+            linhas.append(f"*{p['id']}* — {p['fornecedor']}\n💰 {fmt_brl(p['valor'])} · venceu {p['vencimento']} ({abs(d)} dias atrás)\n")
+        linhas.append(f"*Total vencido: {fmt_brl(sum(p['valor'] for p in items))}*")
+        send_message(chat_id, "\n".join(linhas))
+        return
+
+    if tl in ["tudo", "lista total", "todas as contas", "todas"]:
+        pagar = data["pagar"]
+        if not pagar:
+            send_message(chat_id, "📋 Nenhuma conta cadastrada.")
+            return
+        linhas = ["📋 *Todas as contas a pagar*\n"]
+        for p in pagar:
+            if p["status"] == "pago":
+                linhas.append(f"✅ *{p['id']}* — {p['fornecedor']}\n💰 {fmt_brl(p['valor'])} · Pago em {p.get('data_pagamento','—')}\n")
+            else:
+                d = days_until(p["vencimento"])
+                linhas.append(f"{status_venc(d)} *{p['id']}* — {p['fornecedor']}\n💰 {fmt_brl(p['valor'])} · {p['vencimento']}\n")
+        send_message(chat_id, "\n".join(linhas))
+        return
+
+    if tl in ["pago", "pagos", "já pago", "já pagos", "historico", "histórico"]:
+        items = [p for p in data["pagar"] if p["status"]=="pago"]
+        if not items:
+            send_message(chat_id, "📋 Nenhuma conta marcada como paga ainda.")
+            return
+        linhas = ["✅ *Contas pagas*\n"]
+        for p in items:
+            linhas.append(f"✅ *{p['id']}* — {p['fornecedor']}\n💰 {fmt_brl(p['valor'])} · Pago em {p.get('data_pagamento','—')}\n")
+        linhas.append(f"*Total pago: {fmt_brl(sum(p['valor'] for p in items))}*")
         send_message(chat_id, "\n".join(linhas))
         return
 
