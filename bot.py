@@ -574,7 +574,7 @@ def handle_message(chat_id, text=None, photo=None, document=None):
             system = """Interprete e retorne JSON: {"intencao": "...", "dados": {"nome":"...","id":"..."}}
 Intenções: menu, marcar_pago, marcar_recebido, nova_conta_pagar, nova_conta_receber, novo_orcamento, resumo
 Ex: "paguei Udinese" → {"intencao":"marcar_pago","dados":{"nome":"Udinese"}}"""
-            result = call_anthropic({"model": "claude-sonnet-4-20250514", "max_tokens": 150, "system": system, "messages": [{"role": "user", "content": text}]})
+            result = call_anthropic({"model": "claude-sonnet-4-6", "max_tokens": 150, "system": system, "messages": [{"role": "user", "content": text}]})
             result = result.replace("```json","").replace("```","").strip()
             parsed = json.loads(result)
             intencao = parsed.get("intencao","menu")
@@ -626,7 +626,7 @@ def read_boleto_image(file_id):
             content = [{"type": "document", "source": {"type": "base64", "media_type": media_type, "data": b64}}, {"type": "text", "text": prompt}]
         else:
             content = [{"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}}, {"type": "text", "text": prompt}]
-        result = call_anthropic({"model": "claude-sonnet-4-20250514", "max_tokens": 300, "messages": [{"role": "user", "content": content}]})
+        result = call_anthropic({"model": "claude-sonnet-4-6", "max_tokens": 300, "messages": [{"role": "user", "content": content}]})
         print(f"[BOLETO] Claude respondeu: {result}")
         cleaned = result.replace("```json","").replace("```","").strip()
         parsed = json.loads(cleaned)
