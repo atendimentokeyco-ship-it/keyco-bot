@@ -1,5 +1,0 @@
-[phases.install]
-cmds = ["pip install aiohttp"]
-
-[start]
-cmd = "python bot.py"
