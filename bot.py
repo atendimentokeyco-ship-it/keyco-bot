@@ -1071,6 +1071,31 @@ def enviar_alerta_diario(chat_id):
 
     send_message(chat_id, msg)
 
+def scheduler():
+    print("[SCHEDULER] Iniciando agendador...")
+    while True:
+        try:
+            now = datetime.now()
+            if now.hour == 8 and now.minute == 0:
+                print("[SCHEDULER] Enviando alerta e planilha diaria")
+                try:
+                    enviar_alerta_diario(ADMIN_CHAT_ID)
+                except Exception as e:
+                    print(f"[SCHEDULER] Erro alerta: {e}")
+                try:
+                    excel_bytes = gerar_excel()
+                    if excel_bytes:
+                        enviar_planilha(ADMIN_CHAT_ID, "Planilha financeira do dia")
+                except Exception as e:
+                    print(f"[SCHEDULER] Erro planilha: {e}")
+                time.sleep(61)
+            else:
+                time.sleep(30)
+        except Exception as e:
+            print(f"[SCHEDULER] Erro: {e}")
+            time.sleep(60)
+
+
 def setup_webhook():
     domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
     if domain:
