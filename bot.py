@@ -1004,32 +1004,82 @@ def enviar_email_planilha(excel_bytes, data_str):
         print(f"[EMAIL] Erro: {e}")
         return False
 
-def scheduler():
-    print("[SCHEDULER] Iniciando agendador...")
-    while True:
+def enviar_alerta_diario(chat_id):
+    db = load_data()
+    now = datetime.now()
+    dias = ["Segunda","Terca","Quarta","Quinta","Sexta","Sabado","Domingo"]
+    dia = dias[now.weekday()]
+    data_fmt = now.strftime("%d/%m/%Y")
+
+    pag_ab = [p for p in db["pagar"] if p["status"]=="aberto"]
+    pag_venc = [p for p in pag_ab if days_until(p["vencimento"])<0]
+    pag_hoje = [p for p in pag_ab if days_until(p["vencimento"])==0]
+    pag_sem = [p for p in pag_ab if 1<=days_until(p["vencimento"])<=7]
+    rec_ab = [r for r in db["receber"] if r["status"]=="aberto"]
+    rec_venc = [r for r in rec_ab if days_until(r["vencimento"])<0]
+    rec_hoje = [r for r in rec_ab if days_until(r["vencimento"])==0]
+
+    msg = "Bom dia! " + dia + ", " + data_fmt + "\n\n"
+
+    if pag_venc:
+        msg += "🔴 *CONTAS VENCIDAS:*\n"
+        for p in pag_venc:
+            d = abs(days_until(p["vencimento"]))
+            msg += "  • " + p["id"] + " — " + p["fornecedor"] + "\n"
+            msg += "    " + fmt_brl(p["valor"]) + " · venceu ha " + str(d) + "d\n"
+        msg += "\n"
+
+    if pag_hoje:
+        msg += "🔴 *VENCE HOJE:*\n"
+        for p in pag_hoje:
+            msg += "  • " + p["id"] + " — " + p["fornecedor"] + "\n"
+            msg += "    " + fmt_brl(p["valor"]) + "\n"
+        msg += "\n"
+
+    if pag_sem:
+        msg += "🟡 *VENCE ESTA SEMANA:*\n"
+        for p in sorted(pag_sem, key=lambda x: days_until(x["vencimento"])):
+            d = days_until(p["vencimento"])
+            msg += "  • " + p["id"] + " — " + p["fornecedor"] + "\n"
+            msg += "    " + fmt_brl(p["valor"]) + " · em " + str(d) + "d (" + p["vencimento"] + ")\n"
+        msg += "\n"
+
+    if rec_venc or rec_hoje:
+        msg += "📥 *COBRANÇAS VENCIDAS/HOJE:*\n"
+        for r in rec_venc:
+            d = abs(days_until(r["vencimento"]))
+            msg += "  • " + r["id"] + " — " + r["cliente"] + "\n"
+            msg += "    " + fmt_brl(r["valor"]) + " · venceu ha " + str(d) + "d\n"
+        for r in rec_hoje:
+            msg += "  • " + r["id"] + " — " + r["cliente"] + "\n"
+            msg += "    " + fmt_brl(r["valor"]) + " · vence hoje\n"
+        msg += "\n"
+
+    urgente = sum(float(p["valor"]) for p in pag_venc+pag_hoje)
+    semana_total = sum(float(p["valor"]) for p in pag_sem)
+    a_receber = sum(float(r["valor"]) for r in rec_ab)
+
+    msg += "─────────────────\n"
+    if urgente > 0:
+        msg += "🔴 *Urgente pagar:* " + fmt_brl(urgente) + "\n"
+    if semana_total > 0:
+        msg += "🟡 *Semana:* " + fmt_brl(semana_total) + "\n"
+    msg += "📥 *A receber:* " + fmt_brl(a_receber) + "\n"
+
+    if not pag_venc and not pag_hoje and not pag_sem and not rec_venc and not rec_hoje:
+        msg = "Bom dia! " + dia + ", " + data_fmt + "\n\n✅ Nenhuma pendencia critica hoje. Bom dia!"
+
+    send_message(chat_id, msg)
+
+def setup_webhook():
+    domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+    if domain:
+        url = f"https://{domain}/webhook"
         try:
-            now = datetime.now()
-            if now.hour == 8 and now.minute == 0:
-                print(f"[SCHEDULER] Enviando planilha diária {now.strftime('%d/%m/%Y')}")
-                excel_bytes = gerar_excel()
-                if excel_bytes:
-                    data_str = now.strftime("%d/%m/%Y")
-                    # Telegram
-                    try:
-                        enviar_planilha(ADMIN_CHAT_ID, "☀️ Bom dia! Planilha financeira do dia")
-                    except Exception as e:
-                        print(f"[SCHEDULER] Erro Telegram: {e}")
-                    # Email
-                    try:
-                        enviar_email_planilha(excel_bytes, data_str)
-                    except Exception as e:
-                        print(f"[SCHEDULER] Erro email: {e}")
-                time.sleep(61)
-            else:
-                time.sleep(30)
+            http_post(f"{TELEGRAM_API}/setWebhook", {"url": url})
+            print(f"Webhook: {url}")
         except Exception as e:
-            print(f"[SCHEDULER] Erro: {e}")
-            time.sleep(60)
+            print(f"Erro webhook: {e}")
 
 # ── WEBHOOK ──
 class WebhookHandler(BaseHTTPRequestHandler):
@@ -1042,13 +1092,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"ok")
             try:
                 update = json.loads(body)
-                # Callback query (botão clicado)
                 if "callback_query" in update:
                     cb = update["callback_query"]
                     chat_id = cb["message"]["chat"]["id"]
                     data_cb = cb["data"]
                     answer_callback(cb["id"])
-                    # Confirmar boleto via botão
                     if data_cb.startswith("confirmar_boleto_"):
                         tipo = data_cb.replace("confirmar_boleto_","")
                         state = user_states.get(chat_id, {})
@@ -1059,13 +1107,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
                             db["pagar"].append(item)
                             save_data(db)
                             user_states[chat_id] = {}
-                            threading.Thread(target=send_message, args=(chat_id, f"✅ *{item['id']}* lançado!\n🏢 {item['fornecedor']}\n💰 {fmt_brl(item['valor'])}\n📅 {item['vencimento']}", [[{"text": "💸 Ver contas", "callback_data": "menu_pagar"}, {"text": "🏠 Menu", "callback_data": "menu_principal"}]])).start()
+                            threading.Thread(target=send_message, args=(chat_id, "Lancado " + item["id"] + " — " + item["fornecedor"] + " " + fmt_brl(item["valor"]), [[{"text": "💸 Ver contas", "callback_data": "menu_pagar"}, {"text": "🏠 Menu", "callback_data": "menu_principal"}]])).start()
                         else:
                             item = {"id": next_id(db,"COB"), "cliente": temp.get("fornecedor","Sem nome"), "valor": float(temp.get("valor",0)), "vencimento": temp.get("vencimento",""), "status": "aberto", "nf": ""}
                             db["receber"].append(item)
                             save_data(db)
                             user_states[chat_id] = {}
-                            threading.Thread(target=send_message, args=(chat_id, f"✅ *{item['id']}* lançado!", [[{"text": "🏠 Menu", "callback_data": "menu_principal"}]])).start()
+                            threading.Thread(target=send_message, args=(chat_id, "Lancado " + item["id"], [[{"text": "🏠 Menu", "callback_data": "menu_principal"}]])).start()
                     elif data_cb.startswith("orc_aprovar_"):
                         orc_id = data_cb.replace("orc_aprovar_","")
                         db = load_data()
@@ -1073,7 +1121,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                         if orc:
                             orc["status"] = "aprovado"
                             save_data(db)
-                            threading.Thread(target=send_message, args=(chat_id, f"✅ *{orc['id']}* aprovado!", [[{"text": "📋 Orçamentos", "callback_data": "menu_orcamentos"}]])).start()
+                            threading.Thread(target=send_message, args=(chat_id, "Orcamento " + orc["id"] + " aprovado!", [[{"text": "📋 Orçamentos", "callback_data": "menu_orcamentos"}]])).start()
                     elif data_cb.startswith("orc_recusar_"):
                         orc_id = data_cb.replace("orc_recusar_","")
                         db = load_data()
@@ -1081,10 +1129,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
                         if orc:
                             orc["status"] = "recusado"
                             save_data(db)
-                            threading.Thread(target=send_message, args=(chat_id, f"❌ *{orc['id']}* recusado.", [[{"text": "📋 Orçamentos", "callback_data": "menu_orcamentos"}]])).start()
+                            threading.Thread(target=send_message, args=(chat_id, "Orcamento " + orc["id"] + " recusado.", [[{"text": "📋 Orçamentos", "callback_data": "menu_orcamentos"}]])).start()
                     else:
                         threading.Thread(target=handle_callback, args=(chat_id, data_cb)).start()
-                # Mensagem normal
                 elif "message" in update:
                     message = update["message"]
                     chat_id = message.get("chat", {}).get("id")
@@ -1108,15 +1155,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-def setup_webhook():
-    domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
-    if domain:
-        url = f"https://{domain}/webhook"
-        try:
-            http_post(f"{TELEGRAM_API}/setWebhook", {"url": url})
-            print(f"Webhook: {url}")
-        except Exception as e:
-            print(f"Erro webhook: {e}")
 
 if __name__ == "__main__":
     if EXCEL_OK:
