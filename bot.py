@@ -674,168 +674,268 @@ def gerar_excel():
     if not EXCEL_OK:
         return None
     try:
+        from openpyxl.utils import get_column_letter
         db = load_data()
+        hoje = datetime.now()
+        data_str = hoje.strftime("%d/%m/%Y")
+        hora_str = hoje.strftime("%H:%M")
+
+        COR_AZUL="1A4F8A"; COR_AZUL_CLARO="E8F0FA"; COR_VERDE="27AE60"; COR_VERDE_CLARO="D5F5E3"
+        COR_VERMELHO="C0392B"; COR_VERMELHO_CLARO="FADBD8"; COR_LARANJA="E67E22"; COR_LARANJA_CLARO="FDEBD0"
+        COR_CINZA="7F8C8D"; COR_CINZA_CLARO="F2F3F4"; COR_AMARELO_CLARO="FEF9E7"; COR_BRANCO="FFFFFF"
+        COR_PRETO="1A1A1A"; COR_HEADER_DARK="1A2940"
+
+        def fl(cor): return PatternFill("solid", fgColor=cor)
+        def fn(bold=False,size=10,cor="1A1A1A",italic=False): return Font(bold=bold,size=size,color=cor,italic=italic,name="Calibri")
+        def bd():
+            s=Side(style="thin",color="CCCCCC")
+            return Border(left=s,right=s,top=s,bottom=s)
+        def al(h="left",v="center",wrap=False): return Alignment(horizontal=h,vertical=v,wrap_text=wrap)
+
+        def header_row(ws, headers, row, bg=COR_HEADER_DARK, fg=COR_BRANCO):
+            ws.append(headers)
+            for cell in ws[row]:
+                cell.font=fn(bold=True,size=10,cor=fg); cell.fill=fl(bg)
+                cell.alignment=al("center"); cell.border=bd()
+
+        def titulo_sheet(ws, titulo, subtitulo, cor):
+            ws.row_dimensions[1].height=40; ws.row_dimensions[2].height=20; ws.row_dimensions[3].height=8
+            c1=ws.cell(row=1,column=1,value=titulo)
+            c1.font=Font(bold=True,size=16,color=COR_BRANCO,name="Calibri")
+            c1.fill=fl(cor); c1.alignment=al("left","center")
+            c2=ws.cell(row=2,column=1,value=subtitulo)
+            c2.font=fn(size=10,cor="999999",italic=True)
+            c2.fill=fl(COR_CINZA_CLARO); c2.alignment=al("left","center")
+
+        def merge_titulo(ws, cols, cor):
+            for col in range(1,cols+1):
+                ws.cell(row=1,column=col).fill=fl(cor)
+                ws.cell(row=2,column=col).fill=fl(COR_CINZA_CLARO)
+                ws.cell(row=3,column=col).fill=fl(COR_BRANCO)
+            ws.merge_cells(f"A1:{get_column_letter(cols)}1")
+            ws.merge_cells(f"A2:{get_column_letter(cols)}2")
+            ws.merge_cells(f"A3:{get_column_letter(cols)}3")
+
+        def fmt_v(v):
+            try: return float(v)
+            except: return 0
+
+        pag_ab=[p for p in db["pagar"] if p["status"]=="aberto"]
+        pag_pg=[p for p in db["pagar"] if p["status"]=="pago"]
+        pag_venc=[p for p in pag_ab if days_until(p["vencimento"])<0]
+        pag_hoje=[p for p in pag_ab if days_until(p["vencimento"])==0]
+        pag_sem=[p for p in pag_ab if 1<=days_until(p["vencimento"])<=7]
+        rec_ab=[r for r in db["receber"] if r["status"]=="aberto"]
+        rec_pg=[r for r in db["receber"] if r["status"]=="pago"]
+        rec_venc=[r for r in rec_ab if days_until(r["vencimento"])<0]
+        orc_pend=[o for o in db["orcamentos"] if o["status"]=="pendente"]
+        orc_aprov=[o for o in db["orcamentos"] if o["status"]=="aprovado"]
+        orc_rec=[o for o in db["orcamentos"] if o["status"]=="recusado"]
+
+        total_pagar=sum(fmt_v(p["valor"]) for p in pag_ab)
+        total_receber=sum(fmt_v(r["valor"]) for r in rec_ab)
+        total_recebido=sum(fmt_v(r["valor"]) for r in rec_pg)
+        total_orc_pend=sum(fmt_v(o["valor"]) for o in orc_pend)
+
         wb = openpyxl.Workbook()
 
-        # Estilos
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        header_fill_red = PatternFill("solid", fgColor="C0392B")
-        header_fill_green = PatternFill("solid", fgColor="27AE60")
-        header_fill_blue = PatternFill("solid", fgColor="2980B9")
-        header_fill_gray = PatternFill("solid", fgColor="7F8C8D")
-        center = Alignment(horizontal="center", vertical="center")
-        left = Alignment(horizontal="left", vertical="center")
-        thin = Border(
-            left=Side(style="thin"), right=Side(style="thin"),
-            top=Side(style="thin"), bottom=Side(style="thin")
-        )
-        vencido_fill = PatternFill("solid", fgColor="FADBD8")
-        hoje_fill = PatternFill("solid", fgColor="FDEBD0")
-        pago_fill = PatternFill("solid", fgColor="D5F5E3")
-        aberto_fill = PatternFill("solid", fgColor="EBF5FB")
+        # ── RESUMO ──
+        ws=wb.active; ws.title="📊 Resumo"; ws.sheet_view.showGridLines=False
+        ws.row_dimensions[1].height=50; ws.row_dimensions[2].height=22; ws.row_dimensions[3].height=12
+        ws.merge_cells("A1:H1")
+        c=ws.cell(row=1,column=1,value="  KEYCOMERCE — RELATÓRIO FINANCEIRO")
+        c.font=Font(bold=True,size=20,color=COR_BRANCO,name="Calibri"); c.fill=fl(COR_AZUL); c.alignment=al("left","center")
+        ws.merge_cells("A2:H2")
+        c2=ws.cell(row=2,column=1,value=f"  Gerado em {data_str} às {hora_str}  |  Santa Cruz do Sul — RS")
+        c2.font=fn(size=10,cor="555555",italic=True); c2.fill=fl("F0F4FA"); c2.alignment=al("left","center")
+        ws.merge_cells("A3:H3"); ws.cell(row=3,column=1).fill=fl(COR_BRANCO)
 
-        def set_header(ws, headers, fill):
-            ws.append(headers)
-            for cell in ws[1]:
-                cell.font = header_font
-                cell.fill = fill
-                cell.alignment = center
-                cell.border = thin
+        def big_card(ws,row,col1,col2,titulo,valor,subtitulo,bg,fg_titulo,fg_valor):
+            ws.row_dimensions[row].height=18; ws.row_dimensions[row+1].height=32; ws.row_dimensions[row+2].height=16
+            c1=ws.cell(row=row,column=col1,value=titulo.upper())
+            c2=ws.cell(row=row+1,column=col1,value=valor)
+            c3=ws.cell(row=row+2,column=col1,value=subtitulo)
+            ws.merge_cells(start_row=row,start_column=col1,end_row=row,end_column=col2)
+            ws.merge_cells(start_row=row+1,start_column=col1,end_row=row+1,end_column=col2)
+            ws.merge_cells(start_row=row+2,start_column=col1,end_row=row+2,end_column=col2)
+            for r in [row,row+1,row+2]:
+                for c in range(col1,col2+1):
+                    cell=ws.cell(row=r,column=c); cell.fill=fl(bg); cell.border=bd()
+            c1.font=fn(bold=True,size=9,cor=fg_titulo); c1.alignment=al("center","center")
+            c2.font=Font(bold=True,size=18,color=fg_valor,name="Calibri"); c2.alignment=al("center","center"); c2.number_format="R$ #,##0.00"
+            c3.font=fn(size=8,cor="888888",italic=True); c3.alignment=al("center","center")
 
-        def auto_width(ws):
-            for col in ws.columns:
-                max_len = 0
-                col_letter = get_column_letter(col[0].column)
-                for cell in col:
-                    try:
-                        if cell.value:
-                            max_len = max(max_len, len(str(cell.value)))
-                    except:
-                        pass
-                ws.column_dimensions[col_letter].width = min(max_len + 4, 40)
+        big_card(ws,4,1,2,"💸 Total a Pagar",total_pagar,f"{len(pag_ab)} conta(s) em aberto","FFF5F5","C0392B","C0392B")
+        big_card(ws,4,3,4,"📥 Total a Receber",total_receber,f"{len(rec_ab)} cobrança(s) em aberto","F0FFF4","27AE60","27AE60")
+        big_card(ws,4,5,6,"✅ Total Recebido",total_recebido,f"{len(rec_pg)} cobrança(s) recebida(s)","F0F8FF","1A4F8A","1A4F8A")
+        big_card(ws,4,7,8,"📋 Orç. Pendentes",total_orc_pend,f"{len(orc_pend)} orçamento(s) aguardando","FFFDF0","E67E22","E67E22")
 
-        hoje = datetime.now()
+        ws.row_dimensions[7].height=10
+        for c in range(1,9): ws.cell(row=7,column=c).fill=fl(COR_BRANCO)
 
-        # ── ABA RESUMO ──
-        ws_res = wb.active
-        ws_res.title = "Resumo"
-        ws_res.append(["KEYCOMERCE — RESUMO FINANCEIRO"])
-        ws_res.append([f"Gerado em: {hoje.strftime('%d/%m/%Y às %H:%M')}"])
-        ws_res.append([])
-        ws_res["A1"].font = Font(bold=True, size=14, color="1A4F8A")
-        ws_res["A2"].font = Font(italic=True, size=10, color="7F8C8D")
+        row=8; ws.row_dimensions[row].height=22
+        ws.merge_cells(f"A{row}:H{row}")
+        c=ws.cell(row=row,column=1,value="⚠  ALERTAS E PENDÊNCIAS")
+        c.font=fn(bold=True,size=11,cor=COR_BRANCO); c.fill=fl(COR_AZUL); c.alignment=al("left","center")
 
-        pag_ab = [p for p in db["pagar"] if p["status"]=="aberto"]
-        pag_pg = [p for p in db["pagar"] if p["status"]=="pago"]
-        pag_venc = [p for p in pag_ab if days_until(p["vencimento"])<0]
-        pag_hoje = [p for p in pag_ab if days_until(p["vencimento"])==0]
-        pag_sem = [p for p in pag_ab if 1<=days_until(p["vencimento"])<=7]
-        rec_ab = [r for r in db["receber"] if r["status"]=="aberto"]
-        rec_pg = [r for r in db["receber"] if r["status"]=="pago"]
-        rec_venc = [r for r in rec_ab if days_until(r["vencimento"])<0]
-        orc_pend = [o for o in db["orcamentos"] if o["status"]=="pendente"]
-        orc_aprov = [o for o in db["orcamentos"] if o["status"]=="aprovado"]
+        alertas=[]
+        if pag_venc: alertas.append(("🔴 VENCIDO",f"{len(pag_venc)} conta(s) vencida(s) — Total: {fmt_brl(sum(fmt_v(p["valor"]) for p in pag_venc))}",COR_VERMELHO_CLARO,COR_VERMELHO))
+        if pag_hoje: alertas.append(("🔴 HOJE",f"{len(pag_hoje)} conta(s) vence(m) hoje — Total: {fmt_brl(sum(fmt_v(p["valor"]) for p in pag_hoje))}",COR_LARANJA_CLARO,COR_LARANJA))
+        if pag_sem: alertas.append(("🟡 ESTA SEMANA",f"{len(pag_sem)} conta(s) nos próximos 7 dias — Total: {fmt_brl(sum(fmt_v(p["valor"]) for p in pag_sem))}",COR_AMARELO_CLARO,"B7950B"))
+        if rec_venc: alertas.append(("🔴 COBRANÇAS VENCIDAS",f"{len(rec_venc)} cobrança(s) vencida(s) — Total: {fmt_brl(sum(fmt_v(r["valor"]) for r in rec_venc))}",COR_VERMELHO_CLARO,COR_VERMELHO))
+        if orc_pend: alertas.append(("🟡 ORÇAMENTOS PENDENTES",f"{len(orc_pend)} orçamento(s) aguardando — Total: {fmt_brl(sum(fmt_v(o["valor"]) for o in orc_pend))}",COR_AMARELO_CLARO,"B7950B"))
+        if not alertas: alertas.append(("✅ TUDO EM DIA","Nenhuma pendência crítica.",COR_VERDE_CLARO,COR_VERDE))
 
-        resumo_data = [
-            ["CATEGORIA", "QUANTIDADE", "VALOR TOTAL"],
-            ["A PAGAR — Em aberto", len(pag_ab), sum(float(p["valor"]) for p in pag_ab)],
-            ["A PAGAR — Vencidas", len(pag_venc), sum(float(p["valor"]) for p in pag_venc)],
-            ["A PAGAR — Vence hoje", len(pag_hoje), sum(float(p["valor"]) for p in pag_hoje)],
-            ["A PAGAR — Esta semana", len(pag_sem), sum(float(p["valor"]) for p in pag_sem)],
-            ["A PAGAR — Pagas", len(pag_pg), sum(float(p["valor"]) for p in pag_pg)],
-            [],
-            ["A RECEBER — Em aberto", len(rec_ab), sum(float(r["valor"]) for r in rec_ab)],
-            ["A RECEBER — Vencidas", len(rec_venc), sum(float(r["valor"]) for r in rec_venc)],
-            ["A RECEBER — Recebidas", len(rec_pg), sum(float(r["valor"]) for r in rec_pg)],
-            [],
-            ["ORÇAMENTOS — Pendentes", len(orc_pend), sum(float(o["valor"]) for o in orc_pend)],
-            ["ORÇAMENTOS — Aprovados", len(orc_aprov), sum(float(o["valor"]) for o in orc_aprov)],
+        for i,(status,msg,bg_c,fg_c) in enumerate(alertas):
+            r=row+1+i; ws.row_dimensions[r].height=20
+            ws.merge_cells(f"A{r}:B{r}"); ws.merge_cells(f"C{r}:H{r}")
+            c1=ws.cell(row=r,column=1,value=status)
+            c1.font=fn(bold=True,size=9,cor=fg_c); c1.fill=fl(bg_c); c1.alignment=al("center","center"); c1.border=bd()
+            c2=ws.cell(row=r,column=3,value=msg)
+            c2.font=fn(size=9,cor="333333"); c2.fill=fl(bg_c); c2.alignment=al("left","center"); c2.border=bd()
+            ws.cell(row=r,column=2).fill=fl(bg_c); ws.cell(row=r,column=2).border=bd()
+
+        row_sum=row+len(alertas)+2; ws.row_dimensions[row_sum].height=22
+        ws.merge_cells(f"A{row_sum}:H{row_sum}")
+        c=ws.cell(row=row_sum,column=1,value="📈  RESUMO FINANCEIRO CONSOLIDADO")
+        c.font=fn(bold=True,size=11,cor=COR_BRANCO); c.fill=fl(COR_AZUL); c.alignment=al("left","center")
+
+        resumo_dados=[
+            ("A PAGAR","Em aberto",len(pag_ab),total_pagar,COR_VERMELHO_CLARO),
+            ("A PAGAR","Vencidas",len(pag_venc),sum(fmt_v(p["valor"]) for p in pag_venc),COR_VERMELHO_CLARO),
+            ("A PAGAR","Vence hoje",len(pag_hoje),sum(fmt_v(p["valor"]) for p in pag_hoje),COR_LARANJA_CLARO),
+            ("A PAGAR","Esta semana",len(pag_sem),sum(fmt_v(p["valor"]) for p in pag_sem),COR_AMARELO_CLARO),
+            ("A PAGAR","Pagas",len(pag_pg),sum(fmt_v(p["valor"]) for p in pag_pg),COR_VERDE_CLARO),
+            (None,None,None,None,COR_BRANCO),
+            ("A RECEBER","Em aberto",len(rec_ab),total_receber,COR_AZUL_CLARO),
+            ("A RECEBER","Vencidas",len(rec_venc),sum(fmt_v(r["valor"]) for r in rec_venc),COR_VERMELHO_CLARO),
+            ("A RECEBER","Recebidas",len(rec_pg),total_recebido,COR_VERDE_CLARO),
+            (None,None,None,None,COR_BRANCO),
+            ("ORÇAMENTOS","Pendentes",len(orc_pend),total_orc_pend,COR_AMARELO_CLARO),
+            ("ORÇAMENTOS","Aprovados",len(orc_aprov),sum(fmt_v(o["valor"]) for o in orc_aprov),COR_VERDE_CLARO),
+            ("ORÇAMENTOS","Recusados",len(orc_rec),sum(fmt_v(o["valor"]) for o in orc_rec),COR_VERMELHO_CLARO),
         ]
-        for row in resumo_data:
-            ws_res.append(row)
-        ws_res.column_dimensions["A"].width = 35
-        ws_res.column_dimensions["B"].width = 15
-        ws_res.column_dimensions["C"].width = 20
+        r_h=row_sum+1; ws.row_dimensions[r_h].height=18
+        for col,h in enumerate(["MÓDULO","CATEGORIA","QTD","VALOR TOTAL"],1):
+            c=ws.cell(row=r_h,column=col,value=h)
+            c.font=fn(bold=True,size=9,cor=COR_BRANCO); c.fill=fl(COR_HEADER_DARK); c.alignment=al("center"); c.border=bd()
+        for col in range(5,9): ws.cell(row=r_h,column=col).fill=fl(COR_HEADER_DARK); ws.cell(row=r_h,column=col).border=bd()
+        ws.merge_cells(f"E{r_h}:H{r_h}")
+        for i,(modulo,cat,qtd,valor,bg_c) in enumerate(resumo_dados):
+            r=r_h+1+i; ws.row_dimensions[r].height=18
+            if modulo is None:
+                ws.row_dimensions[r].height=6
+                for col in range(1,9): ws.cell(row=r,column=col).fill=fl(COR_BRANCO)
+                continue
+            ws.merge_cells(f"E{r}:H{r}")
+            for col,val in enumerate([modulo,cat,qtd,valor],1):
+                c=ws.cell(row=r,column=col,value=val)
+                c.font=fn(size=9,bold=(col==1)); c.fill=fl(bg_c); c.border=bd()
+                if col==3: c.alignment=al("center")
+                if col==4: c.number_format="R$ #,##0.00"; c.alignment=al("right")
+            ws.cell(row=r,column=5).fill=fl(bg_c); ws.cell(row=r,column=5).border=bd()
 
-        # ── ABA A PAGAR ──
-        ws_pag = wb.create_sheet("A Pagar")
-        set_header(ws_pag, ["ID", "Fornecedor", "Valor (R$)", "Vencimento", "Status", "Dias", "Data Pagamento"], header_fill_red)
-        for p in sorted(db["pagar"], key=lambda x: days_until(x["vencimento"]) if x["status"]!="pago" else 9999):
-            d = days_until(p["vencimento"]) if p["status"]!="pago" else None
-            if p["status"] == "pago":
-                status_txt = "Pago"
-                dias_txt = "—"
-            elif d < 0:
-                status_txt = "Vencida"
-                dias_txt = f"{abs(d)}d atrás"
-            elif d == 0:
-                status_txt = "Vence hoje"
-                dias_txt = "Hoje"
-            else:
-                status_txt = "Em aberto"
-                dias_txt = f"Em {d}d"
-            row = [p["id"], p["fornecedor"], float(p["valor"]), p["vencimento"], status_txt, dias_txt, p.get("data_pagamento","")]
-            ws_pag.append(row)
-            r = ws_pag.max_row
-            fill = pago_fill if p["status"]=="pago" else (vencido_fill if d is not None and d<=0 else (hoje_fill if d is not None and d<=3 else aberto_fill))
-            for cell in ws_pag[r]:
-                cell.fill = fill
-                cell.border = thin
-                cell.alignment = left
-            ws_pag[f"C{r}"].number_format = 'R$ #,##0.00'
-        auto_width(ws_pag)
+        ws.column_dimensions["A"].width=16; ws.column_dimensions["B"].width=22
+        ws.column_dimensions["C"].width=8; ws.column_dimensions["D"].width=18
+        for cc in ["E","F","G","H"]: ws.column_dimensions[cc].width=14
 
-        # ── ABA A RECEBER ──
-        ws_rec = wb.create_sheet("A Receber")
-        set_header(ws_rec, ["ID", "Cliente", "Valor (R$)", "Vencimento", "Status", "Dias", "Data Recebimento", "NF"], header_fill_green)
-        for r in sorted(db["receber"], key=lambda x: days_until(x["vencimento"]) if x["status"]!="pago" else 9999):
-            d = days_until(r["vencimento"]) if r["status"]!="pago" else None
-            if r["status"] == "pago":
-                status_txt = "Recebido"
-                dias_txt = "—"
-            elif d < 0:
-                status_txt = "Vencida"
-                dias_txt = f"{abs(d)}d atrás"
-            elif d == 0:
-                status_txt = "Vence hoje"
-                dias_txt = "Hoje"
-            else:
-                status_txt = "Em aberto"
-                dias_txt = f"Em {d}d"
-            row_data = [r["id"], r["cliente"], float(r["valor"]), r["vencimento"], status_txt, dias_txt, r.get("data_pagamento",""), r.get("nf","")]
-            ws_rec.append(row_data)
-            rn = ws_rec.max_row
-            fill = pago_fill if r["status"]=="pago" else (vencido_fill if d is not None and d<=0 else (hoje_fill if d is not None and d<=3 else aberto_fill))
-            for cell in ws_rec[rn]:
-                cell.fill = fill
-                cell.border = thin
-                cell.alignment = left
-            ws_rec[f"C{rn}"].number_format = 'R$ #,##0.00'
-        auto_width(ws_rec)
+        # ── A PAGAR ──
+        ws2=wb.create_sheet("💸 A Pagar"); ws2.sheet_view.showGridLines=False
+        titulo_sheet(ws2,"  KEYCOMERCE  |  CONTAS A PAGAR",f"  Gerado em {data_str} às {hora_str}",COR_VERMELHO)
+        merge_titulo(ws2,9,COR_VERMELHO)
+        header_row(ws2,["ID","Fornecedor / Descrição","Valor (R$)","Vencimento","Tipo Pgto","Status","Dias","Data Pagamento","Observações"],row=4,bg=COR_VERMELHO)
+        sf={"pago":(COR_VERDE_CLARO,COR_VERDE),"vencido":(COR_VERMELHO_CLARO,COR_VERMELHO),"hoje":(COR_LARANJA_CLARO,COR_LARANJA),"semana":(COR_AMARELO_CLARO,"B7950B"),"aberto":(COR_AZUL_CLARO,COR_AZUL)}
+        for p in sorted(db["pagar"],key=lambda x:(0 if x["status"]=="aberto" else 1,days_until(x["vencimento"]))):
+            d=days_until(p["vencimento"])
+            if p["status"]=="pago": st="pago";st_txt="✅ Pago";dias_txt="—"
+            elif d<0: st="vencido";st_txt="🔴 Vencida";dias_txt=f"{abs(d)}d atrás"
+            elif d==0: st="hoje";st_txt="🔴 Vence Hoje";dias_txt="HOJE"
+            elif d<=7: st="semana";st_txt="🟡 Esta Semana";dias_txt=f"Em {d}d"
+            else: st="aberto";st_txt="🟢 Em Aberto";dias_txt=f"Em {d}d"
+            bg_c,fg_c=sf[st]
+            ws2.append([p["id"],p["fornecedor"],fmt_v(p["valor"]),p["vencimento"],p.get("tipo","—"),st_txt,dias_txt,p.get("data_pagamento","—"),p.get("obs","")])
+            r=ws2.max_row; ws2.row_dimensions[r].height=18
+            for col,cell in enumerate(ws2[r],1):
+                cell.fill=fl(bg_c); cell.border=bd()
+                cell.font=fn(size=9,bold=(col==1),cor=fg_c if col==6 else COR_PRETO)
+                if col==3: cell.number_format="R$ #,##0.00"; cell.alignment=al("right")
+                elif col in [4,7,8]: cell.alignment=al("center")
+                else: cell.alignment=al("left")
+        ws2.append([])
+        for lbl,total in [("TOTAL EM ABERTO:",sum(fmt_v(p["valor"]) for p in pag_ab)),("TOTAL PAGO:",sum(fmt_v(p["valor"]) for p in pag_pg)),("TOTAL GERAL:",sum(fmt_v(p["valor"]) for p in db["pagar"]))]:
+            ws2.append(["",lbl,total])
+            r=ws2.max_row
+            ws2.cell(row=r,column=2).font=fn(bold=True,size=9); ws2.cell(row=r,column=2).fill=fl(COR_CINZA_CLARO); ws2.cell(row=r,column=2).border=bd()
+            c3=ws2.cell(row=r,column=3); c3.number_format="R$ #,##0.00"; c3.font=fn(bold=True,size=10,cor=COR_VERMELHO); c3.fill=fl(COR_CINZA_CLARO); c3.border=bd(); c3.alignment=al("right")
+        ws2.column_dimensions["A"].width=10; ws2.column_dimensions["B"].width=35; ws2.column_dimensions["C"].width=16
+        ws2.column_dimensions["D"].width=14; ws2.column_dimensions["E"].width=16; ws2.column_dimensions["F"].width=18
+        ws2.column_dimensions["G"].width=14; ws2.column_dimensions["H"].width=18; ws2.column_dimensions["I"].width=35
 
-        # ── ABA ORÇAMENTOS ──
-        ws_orc = wb.create_sheet("Orçamentos")
-        set_header(ws_orc, ["ID", "Cliente", "Descrição", "Valor (R$)", "Status", "Data"], header_fill_blue)
-        status_colors = {"pendente": hoje_fill, "aprovado": pago_fill, "recusado": vencido_fill, "enviado": aberto_fill}
+        # ── A RECEBER ──
+        ws3=wb.create_sheet("📥 A Receber"); ws3.sheet_view.showGridLines=False
+        titulo_sheet(ws3,"  KEYCOMERCE  |  CONTAS A RECEBER",f"  Gerado em {data_str} às {hora_str}",COR_VERDE)
+        merge_titulo(ws3,9,COR_VERDE)
+        header_row(ws3,["ID","Cliente","Valor (R$)","Vencimento","Status","Dias","NF","Pedido","Observações"],row=4,bg=COR_VERDE)
+        for r_item in sorted(db["receber"],key=lambda x:(0 if x["status"]=="aberto" else 1,days_until(x["vencimento"]))):
+            d=days_until(r_item["vencimento"])
+            if r_item["status"]=="pago": st="pago";st_txt="✅ Recebido";dias_txt="—"
+            elif d<0: st="vencido";st_txt="🔴 Vencida";dias_txt=f"{abs(d)}d atrás"
+            elif d==0: st="hoje";st_txt="🔴 Vence Hoje";dias_txt="HOJE"
+            elif d<=7: st="semana";st_txt="🟡 Esta Semana";dias_txt=f"Em {d}d"
+            else: st="aberto";st_txt="🟢 Em Aberto";dias_txt=f"Em {d}d"
+            bg_c,fg_c=sf[st]
+            ws3.append([r_item["id"],r_item["cliente"],fmt_v(r_item["valor"]),r_item["vencimento"],st_txt,dias_txt,r_item.get("nf","—"),r_item.get("pedido","—"),r_item.get("obs","")])
+            r=ws3.max_row; ws3.row_dimensions[r].height=18
+            for col,cell in enumerate(ws3[r],1):
+                cell.fill=fl(bg_c); cell.border=bd()
+                cell.font=fn(size=9,bold=(col==1),cor=fg_c if col==5 else COR_PRETO)
+                if col==3: cell.number_format="R$ #,##0.00"; cell.alignment=al("right")
+                elif col in [4,6,7,8]: cell.alignment=al("center")
+                else: cell.alignment=al("left")
+        ws3.append([])
+        for lbl,total in [("TOTAL EM ABERTO:",sum(fmt_v(r["valor"]) for r in rec_ab)),("TOTAL RECEBIDO:",sum(fmt_v(r["valor"]) for r in rec_pg)),("TOTAL GERAL:",sum(fmt_v(r["valor"]) for r in db["receber"]))]:
+            ws3.append(["",lbl,total])
+            r=ws3.max_row
+            ws3.cell(row=r,column=2).font=fn(bold=True,size=9); ws3.cell(row=r,column=2).fill=fl(COR_CINZA_CLARO); ws3.cell(row=r,column=2).border=bd()
+            c3=ws3.cell(row=r,column=3); c3.number_format="R$ #,##0.00"; c3.font=fn(bold=True,size=10,cor=COR_VERDE); c3.fill=fl(COR_CINZA_CLARO); c3.border=bd(); c3.alignment=al("right")
+        ws3.column_dimensions["A"].width=10; ws3.column_dimensions["B"].width=30; ws3.column_dimensions["C"].width=16
+        ws3.column_dimensions["D"].width=14; ws3.column_dimensions["E"].width=18; ws3.column_dimensions["F"].width=14
+        ws3.column_dimensions["G"].width=14; ws3.column_dimensions["H"].width=12; ws3.column_dimensions["I"].width=35
+
+        # ── ORÇAMENTOS ──
+        ws4=wb.create_sheet("📋 Orçamentos"); ws4.sheet_view.showGridLines=False
+        titulo_sheet(ws4,"  KEYCOMERCE  |  ORÇAMENTOS",f"  Gerado em {data_str} às {hora_str}",COR_LARANJA)
+        merge_titulo(ws4,8,COR_LARANJA)
+        header_row(ws4,["ID","Cliente","Descrição","Valor (R$)","Tipo","Canal","Status","Data"],row=4,bg=COR_LARANJA)
+        osf={"pendente":(COR_AMARELO_CLARO,"B7950B"),"aprovado":(COR_VERDE_CLARO,COR_VERDE),"recusado":(COR_VERMELHO_CLARO,COR_VERMELHO),"enviado":(COR_AZUL_CLARO,COR_AZUL)}
+        ost={"pendente":"🟡 Pendente","aprovado":"🟢 Aprovado","recusado":"🔴 Recusado","enviado":"🔵 Enviado"}
         for o in db["orcamentos"]:
-            ws_orc.append([o["id"], o["cliente"], o["descricao"], float(o["valor"]), o["status"].capitalize(), o["data"]])
-            rn = ws_orc.max_row
-            fill = status_colors.get(o["status"], aberto_fill)
-            for cell in ws_orc[rn]:
-                cell.fill = fill
-                cell.border = thin
-                cell.alignment = left
-            ws_orc[f"D{rn}"].number_format = 'R$ #,##0.00'
-        auto_width(ws_orc)
+            bg_c,fg_c=osf.get(o["status"],(COR_CINZA_CLARO,COR_CINZA))
+            ws4.append([o["id"],o["cliente"],o["descricao"],fmt_v(o["valor"]),o.get("tipo","—"),o.get("canal","—"),ost.get(o["status"],o["status"]),o["data"]])
+            r=ws4.max_row; ws4.row_dimensions[r].height=18
+            for col,cell in enumerate(ws4[r],1):
+                cell.fill=fl(bg_c); cell.border=bd()
+                cell.font=fn(size=9,bold=(col==1),cor=fg_c if col==7 else COR_PRETO)
+                if col==4: cell.number_format="R$ #,##0.00"; cell.alignment=al("right")
+                elif col in [6,7,8]: cell.alignment=al("center")
+                else: cell.alignment=al("left")
+        ws4.append([])
+        for lbl,total in [("PENDENTES:",sum(fmt_v(o["valor"]) for o in orc_pend)),("APROVADOS:",sum(fmt_v(o["valor"]) for o in orc_aprov)),("TOTAL GERAL:",sum(fmt_v(o["valor"]) for o in db["orcamentos"]))]:
+            ws4.append(["",lbl,total])
+            r=ws4.max_row
+            ws4.cell(row=r,column=2).font=fn(bold=True,size=9); ws4.cell(row=r,column=2).fill=fl(COR_CINZA_CLARO); ws4.cell(row=r,column=2).border=bd()
+            c3=ws4.cell(row=r,column=3); c3.number_format="R$ #,##0.00"; c3.font=fn(bold=True,size=10,cor=COR_LARANJA); c3.fill=fl(COR_CINZA_CLARO); c3.border=bd(); c3.alignment=al("right")
+        ws4.column_dimensions["A"].width=10; ws4.column_dimensions["B"].width=28; ws4.column_dimensions["C"].width=40
+        ws4.column_dimensions["D"].width=16; ws4.column_dimensions["E"].width=22; ws4.column_dimensions["F"].width=14
+        ws4.column_dimensions["G"].width=16; ws4.column_dimensions["H"].width=14
 
-        # Salvar em buffer
-        buf = io.BytesIO()
-        wb.save(buf)
-        buf.seek(0)
+        buf=io.BytesIO(); wb.save(buf); buf.seek(0)
         return buf.getvalue()
     except Exception as e:
-        print(f"[EXCEL] Erro: {e}")
+        print(f"[EXCEL] Erro gerar: {e}")
+        import traceback; traceback.print_exc()
         return None
+
 
 def enviar_planilha(chat_id, motivo="📊 Planilha diária"):
     if not EXCEL_OK:
