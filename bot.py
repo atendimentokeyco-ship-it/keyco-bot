@@ -7,6 +7,11 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import time
 import io
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email import encoders
 try:
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -21,6 +26,9 @@ ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY", "")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 DATA_FILE = "keyco_data.json"
 ADMIN_CHAT_ID = 8601577256  # Chat ID do Filipi
+EMAIL_FROM = "atendimentokeyco@gmail.com"
+EMAIL_TO = "atendimentokeyco@gmail.com"
+EMAIL_PASS = "oulhurdaivfhtlte"  # Senha de app Gmail
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -491,6 +499,19 @@ def handle_message(chat_id, text=None, photo=None, document=None):
             send_message(chat_id, "❌ Cancelado.", [[{"text": "🏠 Menu", "callback_data": "menu_principal"}]])
         return
 
+    # PLANILHA / EMAIL
+    if tl in ["email", "mandar email", "enviar email", "planilha email"]:
+        send_message(chat_id, "⏳ Gerando e enviando por e-mail...")
+        def _enviar():
+            excel_bytes = gerar_excel()
+            if excel_bytes:
+                ok = enviar_email_planilha(excel_bytes, datetime.now().strftime("%d/%m/%Y"))
+                send_message(chat_id, "✅ Planilha enviada para atendimentokeyco@gmail.com!" if ok else "❌ Erro ao enviar e-mail.")
+            else:
+                send_message(chat_id, "❌ Erro ao gerar planilha.")
+        threading.Thread(target=_enviar).start()
+        return
+
     # PLANILHA
     if tl in ["planilha", "gerar planilha", "exportar", "excel", "relatorio", "relatório"]:
         send_message(chat_id, "⏳ Gerando planilha...")
@@ -857,6 +878,40 @@ def enviar_planilha(chat_id, motivo="📊 Planilha diária"):
         print(f"[EXCEL] Erro envio: {e}")
         send_message(chat_id, f"❌ Erro ao enviar planilha: {e}")
 
+def enviar_email_planilha(excel_bytes, data_str):
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = EMAIL_FROM
+        msg["To"] = EMAIL_TO
+        msg["Subject"] = f"Keycomerce — Planilha Financeira {data_str}"
+
+        body = f"""Bom dia!
+
+Segue em anexo a planilha financeira da Keyco referente a {data_str}.
+
+Resumo rápido:
+• Contas a pagar em aberto
+• Contas a receber em aberto  
+• Orçamentos pendentes
+
+Keycomerce Gestão"""
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+
+        part = MIMEBase("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        part.set_payload(excel_bytes)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", f'attachment; filename="Keycomerce_{data_str.replace("/","")}.xlsx"')
+        msg.attach(part)
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(EMAIL_FROM, EMAIL_PASS)
+            server.send_message(msg)
+        print(f"[EMAIL] Planilha enviada para {EMAIL_TO}")
+        return True
+    except Exception as e:
+        print(f"[EMAIL] Erro: {e}")
+        return False
+
 def scheduler():
     print("[SCHEDULER] Iniciando agendador...")
     while True:
@@ -864,7 +919,19 @@ def scheduler():
             now = datetime.now()
             if now.hour == 8 and now.minute == 0:
                 print(f"[SCHEDULER] Enviando planilha diária {now.strftime('%d/%m/%Y')}")
-                enviar_planilha(ADMIN_CHAT_ID, "☀️ Bom dia! Planilha financeira do dia")
+                excel_bytes = gerar_excel()
+                if excel_bytes:
+                    data_str = now.strftime("%d/%m/%Y")
+                    # Telegram
+                    try:
+                        enviar_planilha(ADMIN_CHAT_ID, "☀️ Bom dia! Planilha financeira do dia")
+                    except Exception as e:
+                        print(f"[SCHEDULER] Erro Telegram: {e}")
+                    # Email
+                    try:
+                        enviar_email_planilha(excel_bytes, data_str)
+                    except Exception as e:
+                        print(f"[SCHEDULER] Erro email: {e}")
                 time.sleep(61)
             else:
                 time.sleep(30)
