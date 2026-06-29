@@ -158,6 +158,16 @@ def kb_orcamentos():
         [{"text": "🏠 Menu", "callback_data": "menu_principal"}]
     ]
 
+def kb_lista_com_apagar(items, tipo):
+    """Gera teclado com botão apagar para cada item"""
+    rows = []
+    for item in items[:8]:  # max 8 itens
+        item_id = item["id"]
+        nome = item.get("fornecedor", item.get("cliente", item.get("descricao","?")))[:20]
+        rows.append([{"text": f"🗑 Apagar {item_id} — {nome}", "callback_data": f"del_{tipo}_{item_id}"}])
+    rows.append([{"text": "◀ Voltar", "callback_data": f"menu_{tipo}"}, {"text": "🏠 Menu", "callback_data": "menu_principal"}])
+    return rows
+
 def kb_voltar_pagar():
     return [[{"text": "◀ Voltar", "callback_data": "menu_pagar"}, {"text": "🏠 Menu", "callback_data": "menu_principal"}]]
 
@@ -276,7 +286,8 @@ def handle_callback(chat_id, data_cb):
 
     if data_cb == "pagar_todas":
         items = db["pagar"]
-        send_message(chat_id, lista_pagar(items, "📊 *Todas as contas a pagar*"), kb_voltar_pagar())
+        kb = kb_lista_com_apagar([p for p in items], "pagar")
+        send_message(chat_id, lista_pagar(items, "📊 *Todas as contas a pagar*"), kb)
         return
 
     # RECEBER
@@ -312,7 +323,8 @@ def handle_callback(chat_id, data_cb):
 
     if data_cb == "receber_todas":
         items = db["receber"]
-        send_message(chat_id, lista_receber(items, "📊 *Todas as cobranças*"), kb_voltar_receber())
+        kb = kb_lista_com_apagar(items, "receber")
+        send_message(chat_id, lista_receber(items, "📊 *Todas as cobranças*"), kb)
         return
 
     # ORÇAMENTOS
@@ -338,7 +350,74 @@ def handle_callback(chat_id, data_cb):
 
     if data_cb == "orc_todos":
         items = db["orcamentos"]
-        send_message(chat_id, lista_orcamentos(items, "📊 *Todos os orçamentos*"), kb_voltar_orc())
+        kb = kb_lista_com_apagar(items, "orc")
+        send_message(chat_id, lista_orcamentos(items, "📊 *Todos os orçamentos*"), kb)
+        return
+
+    # DELETAR VIA CALLBACK
+    if data_cb.startswith("del_pagar_"):
+        item_id = data_cb.replace("del_pagar_","")
+        db = load_data()
+        idx = next((i for i,x in enumerate(db["pagar"]) if x["id"]==item_id), None)
+        if idx is not None:
+            nome = db["pagar"][idx].get("fornecedor","?")
+            # Ask confirmation
+            kb = [[{"text":"✅ Sim, apagar","callback_data":f"delconf_pagar_{item_id}"},{"text":"❌ Cancelar","callback_data":"menu_pagar"}]]
+            send_message(chat_id, "⚠️ Confirma apagar *" + item_id + "*?\n🏢 " + nome, kb)
+        return
+
+    if data_cb.startswith("delconf_pagar_"):
+        item_id = data_cb.replace("delconf_pagar_","")
+        db = load_data()
+        idx = next((i for i,x in enumerate(db["pagar"]) if x["id"]==item_id), None)
+        if idx is not None:
+            nome = db["pagar"][idx].get("fornecedor","?")
+            db["pagar"].pop(idx)
+            save_data(db)
+            send_message(chat_id, f"🗑 *{item_id}* apagado ({nome}).", [[{"text":"💸 Ver contas","callback_data":"menu_pagar"},{"text":"🏠 Menu","callback_data":"menu_principal"}]])
+        return
+
+    if data_cb.startswith("del_receber_"):
+        item_id = data_cb.replace("del_receber_","")
+        db = load_data()
+        idx = next((i for i,x in enumerate(db["receber"]) if x["id"]==item_id), None)
+        if idx is not None:
+            nome = db["receber"][idx].get("cliente","?")
+            kb = [[{"text":"✅ Sim, apagar","callback_data":f"delconf_receber_{item_id}"},{"text":"❌ Cancelar","callback_data":"menu_receber"}]]
+            send_message(chat_id, "⚠️ Confirma apagar *" + item_id + "*?\n👤 " + nome, kb)
+        return
+
+    if data_cb.startswith("delconf_receber_"):
+        item_id = data_cb.replace("delconf_receber_","")
+        db = load_data()
+        idx = next((i for i,x in enumerate(db["receber"]) if x["id"]==item_id), None)
+        if idx is not None:
+            nome = db["receber"][idx].get("cliente","?")
+            db["receber"].pop(idx)
+            save_data(db)
+            send_message(chat_id, f"🗑 *{item_id}* apagado ({nome}).", [[{"text":"📥 Ver cobranças","callback_data":"menu_receber"},{"text":"🏠 Menu","callback_data":"menu_principal"}]])
+        return
+
+    if data_cb.startswith("del_orc_"):
+        item_id = data_cb.replace("del_orc_","")
+        db = load_data()
+        idx = next((i for i,x in enumerate(db["orcamentos"]) if x["id"]==item_id), None)
+        if idx is not None:
+            nome = db["orcamentos"][idx].get("cliente","?")
+            kb = [[{"text":"✅ Sim, apagar","callback_data":f"delconf_orc_{item_id}"},{"text":"❌ Cancelar","callback_data":"menu_orcamentos"}]]
+            send_message(chat_id, "⚠️ Confirma apagar *" + item_id + "*?\n👤 " + nome, kb)
+        return
+
+    if data_cb.startswith("delconf_orc_"):
+        item_id = data_cb.replace("delconf_orc_","")
+        db = load_data()
+        idx = next((i for i,x in enumerate(db["orcamentos"]) if o["id"]==item_id for o in [db["orcamentos"][i]]), None)
+        idx = next((i for i,x in enumerate(db["orcamentos"]) if x["id"]==item_id), None)
+        if idx is not None:
+            nome = db["orcamentos"][idx].get("cliente","?")
+            db["orcamentos"].pop(idx)
+            save_data(db)
+            send_message(chat_id, f"🗑 *{item_id}* apagado ({nome}).", [[{"text":"📋 Orçamentos","callback_data":"menu_orcamentos"},{"text":"🏠 Menu","callback_data":"menu_principal"}]])
         return
 
     # AÇÕES
@@ -511,6 +590,24 @@ def handle_message(chat_id, text=None, photo=None, document=None):
     if tl in ["planilha", "gerar planilha", "exportar", "excel", "relatorio", "relatório"]:
         send_message(chat_id, "⏳ Gerando planilha...")
         threading.Thread(target=enviar_planilha, args=(chat_id, "📊 Planilha gerada agora")).start()
+        return
+
+    # DELETAR
+    if tl.startswith("deletar ") or tl.startswith("excluir ") or tl.startswith("apagar "):
+        item_id = text.upper().replace("DELETAR","").replace("EXCLUIR","").replace("APAGAR","").strip()
+        db = load_data()
+        deleted = False
+        for lista, key in [("pagar","fornecedor"),("receber","cliente"),("orcamentos","cliente")]:
+            idx = next((i for i,x in enumerate(db[lista]) if x["id"]==item_id), None)
+            if idx is not None:
+                nome = db[lista][idx].get(key,"?")
+                db[lista].pop(idx)
+                save_data(db)
+                send_message(chat_id, f"🗑 *{item_id}* deletado ({nome}).", [[{"text":"🏠 Menu","callback_data":"menu_principal"}]])
+                deleted = True
+                break
+        if not deleted:
+            send_message(chat_id, f"❌ ID *{item_id}* não encontrado. Verifique e tente novamente.")
         return
 
     # MARCAR PAGO POR TEXTO
